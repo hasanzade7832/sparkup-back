@@ -1,16 +1,18 @@
 export const registerSchema = {
   body: {
     type: 'object',
-    required: ['name', 'email', 'password'],
+    required: ['name', 'username', 'password'],
     properties: {
       name: {
         type: 'string',
         minLength: 2,
         maxLength: 50
       },
-      email: {
+      username: {
         type: 'string',
-        format: 'email'
+        minLength: 3,
+        maxLength: 30,
+        pattern: '^[a-zA-Z0-9_]+$'
       },
       password: {
         type: 'string',
@@ -24,11 +26,11 @@ export const registerSchema = {
 export const loginSchema = {
   body: {
     type: 'object',
-    required: ['email', 'password'],
+    required: ['username', 'password'],
     properties: {
-      email: {
+      username: {
         type: 'string',
-        format: 'email'
+        minLength: 3
       },
       password: {
         type: 'string',
