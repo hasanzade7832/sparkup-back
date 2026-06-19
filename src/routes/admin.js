@@ -33,6 +33,26 @@ async function adminRoutes(app) {
   }
 
   // GET /api/admin/actions — لیست همه اقدامات
+  async function addScore(userId) {
+    await app.db.query(`
+      INSERT INTO user_scores (user_id, total_score, last_active_date)
+      VALUES ($1, 1, (NOW() AT TIME ZONE 'Asia/Tehran')::date)
+      ON CONFLICT (user_id) DO UPDATE
+      SET total_score = user_scores.total_score + 1,
+          last_active_date = (NOW() AT TIME ZONE 'Asia/Tehran')::date,
+          updated_at = NOW()
+    `, [userId])
+  }
+
+  async function subtractScore(userId) {
+    await app.db.query(`
+      UPDATE user_scores
+      SET total_score = GREATEST(0, total_score - 1),
+          updated_at = NOW()
+      WHERE user_id = $1
+    `, [userId])
+  }
+
   app.get('/actions', {
     preHandler: [isAdmin]
   }, async (request, reply) => {
@@ -158,6 +178,145 @@ async function adminRoutes(app) {
   })
 
   // GET /api/admin/users
+  app.get('/purchases', {
+    preHandler: [isAdmin]
+  }, async (request, reply) => {
+    const { status, page = 1, limit = 20 } = request.query
+    const offset = (Number(page) - 1) * Number(limit)
+
+    try {
+      const params = []
+      let where = ''
+
+      if (status) {
+        params.push(status)
+        where = `WHERE pr.status = $${params.length}`
+      }
+
+      params.push(Number(limit), offset)
+
+      const result = await app.db.query(`
+        SELECT pr.*,
+          u.name as user_name,
+          u.username as user_username,
+          reviewer.name as reviewer_name,
+          COUNT(*) OVER() as total_count
+        FROM purchase_reports pr
+        JOIN users u ON pr.user_id = u.id
+        LEFT JOIN users reviewer ON pr.reviewed_by = reviewer.id
+        ${where}
+        ORDER BY pr.created_at DESC
+        LIMIT $${params.length - 1} OFFSET $${params.length}
+      `, params)
+
+      return reply.send({
+        success: true,
+        data: result.rows,
+        pagination: {
+          page: Number(page),
+          limit: Number(limit),
+          total: Number(result.rows[0]?.total_count || 0),
+          pages: Math.ceil(Number(result.rows[0]?.total_count || 0) / Number(limit))
+        }
+      })
+    } catch (err) {
+      app.log.error(err)
+      return reply.status(500).send({
+        success: false,
+        message: 'خطای سرور'
+      })
+    }
+  })
+
+  app.put('/purchases/:id/approve', {
+    preHandler: [isAdmin]
+  }, async (request, reply) => {
+    const { id } = request.params
+    const reviewerId = request.user.id
+
+    try {
+      const purchase = await app.db.query(
+        'SELECT user_id, status FROM purchase_reports WHERE id = $1',
+        [id]
+      )
+
+      if (purchase.rows.length === 0) {
+        return reply.status(404).send({ success: false, message: 'گزارش خرید پیدا نشد' })
+      }
+
+      const { user_id: userId, status } = purchase.rows[0]
+
+      await app.db.query(`
+        UPDATE purchase_reports
+        SET status = 'approved',
+            reviewed_by = $1,
+            reviewed_at = NOW(),
+            admin_note = NULL,
+            updated_at = NOW()
+        WHERE id = $2
+      `, [reviewerId, id])
+
+      if (status !== 'approved') {
+        await addScore(userId)
+      }
+
+      return reply.send({
+        success: true,
+        message: status === 'approved'
+          ? 'گزارش قبلا تأیید شده بود'
+          : 'گزارش خرید تأیید شد و ۱ امتیاز اضافه شد'
+      })
+    } catch (err) {
+      app.log.error(err)
+      return reply.status(500).send({ success: false, message: 'خطای سرور' })
+    }
+  })
+
+  app.put('/purchases/:id/reject', {
+    preHandler: [isAdmin]
+  }, async (request, reply) => {
+    const { id } = request.params
+    const { note } = request.body || {}
+    const reviewerId = request.user.id
+
+    try {
+      const purchase = await app.db.query(
+        'SELECT user_id, status FROM purchase_reports WHERE id = $1',
+        [id]
+      )
+
+      if (purchase.rows.length === 0) {
+        return reply.status(404).send({ success: false, message: 'گزارش خرید پیدا نشد' })
+      }
+
+      const { user_id: userId, status } = purchase.rows[0]
+
+      await app.db.query(`
+        UPDATE purchase_reports
+        SET status = 'rejected',
+            reviewed_by = $1,
+            reviewed_at = NOW(),
+            admin_note = $2,
+            updated_at = NOW()
+        WHERE id = $3
+      `, [reviewerId, note?.trim() || null, id])
+
+      if (status === 'approved') {
+        await subtractScore(userId)
+      }
+
+      return reply.send({
+        success: true,
+        message: status === 'approved'
+          ? 'گزارش رد شد و ۱ امتیاز کم شد'
+          : 'گزارش خرید رد شد'
+      })
+    } catch (err) {
+      app.log.error(err)
+      return reply.status(500).send({ success: false, message: 'خطای سرور' })
+    }
+  })
+
   app.get('/users', {
     preHandler: [isAdmin]
   }, async (request, reply) => {
@@ -364,11 +523,13 @@ async function adminRoutes(app) {
     preHandler: [isAdmin]
   }, async (request, reply) => {
     try {
-      const [users, posts, actions, pendingActions] = await Promise.all([
+      const [users, posts, actions, pendingActions, purchases, pendingPurchases] = await Promise.all([
         app.db.query('SELECT COUNT(*) as count FROM users'),
         app.db.query('SELECT COUNT(*) as count FROM posts'),
         app.db.query('SELECT COUNT(*) as count FROM daily_actions'),
         app.db.query("SELECT COUNT(*) as count FROM daily_actions WHERE status = 'pending'"),
+        app.db.query('SELECT COUNT(*) as count FROM purchase_reports'),
+        app.db.query("SELECT COUNT(*) as count FROM purchase_reports WHERE status = 'pending'"),
       ])
 
       return reply.send({
@@ -378,6 +539,8 @@ async function adminRoutes(app) {
           total_posts: Number(posts.rows[0].count),
           total_actions: Number(actions.rows[0].count),
           pending_actions: Number(pendingActions.rows[0].count),
+          total_purchases: Number(purchases.rows[0].count),
+          pending_purchases: Number(pendingPurchases.rows[0].count),
         }
       })
 

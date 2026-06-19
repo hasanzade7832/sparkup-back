@@ -30,16 +30,21 @@ async function actionsRoutes(app) {
       `, [userId, category, description.trim()])
 
       await app.db.query(`
-        INSERT INTO user_scores (user_id, total_score, last_active_date)
-        VALUES ($1, 1, (NOW() AT TIME ZONE 'Asia/Tehran')::date)
+        INSERT INTO user_scores (user_id, total_score, streak_count, last_active_date)
+        VALUES ($1, 1, 1, (NOW() AT TIME ZONE 'Asia/Tehran')::date)
         ON CONFLICT (user_id) DO UPDATE
         SET
           total_score = user_scores.total_score + 1,
+          streak_count = CASE
+            WHEN user_scores.last_active_date = (NOW() AT TIME ZONE 'Asia/Tehran')::date
+              THEN user_scores.streak_count
+            WHEN user_scores.last_active_date = ((NOW() AT TIME ZONE 'Asia/Tehran')::date - 1)
+              THEN user_scores.streak_count + 1
+            ELSE 1
+          END,
           last_active_date = (NOW() AT TIME ZONE 'Asia/Tehran')::date,
           updated_at = NOW()
       `, [userId])
-
-      await updateStreak(app, userId)
 
       return reply.status(201).send({
         success: true,
@@ -67,6 +72,7 @@ async function actionsRoutes(app) {
         SELECT DISTINCT TO_CHAR(action_date, 'YYYY-MM-DD') as action_date
         FROM daily_actions
         WHERE user_id = $1
+          AND status != 'rejected'
           AND action_date >= (NOW() AT TIME ZONE 'Asia/Tehran')::date - INTERVAL '6 days'
           AND action_date <= (NOW() AT TIME ZONE 'Asia/Tehran')::date
         ORDER BY action_date ASC

@@ -15,6 +15,7 @@ import commentsRoutes from './routes/comments.js'
 import viewsRoutes from './routes/views.js'
 import savedRoutes from './routes/saved.js'
 import actionsRoutes from './routes/actions.js'
+import purchaseRoutes from './routes/purchases.js'
 import scoresRoutes from './routes/scores.js'
 import adminRoutes from './routes/admin.js'
 
@@ -58,6 +59,7 @@ await app.register(commentsRoutes, { prefix: '/api/comments' })
 await app.register(viewsRoutes, { prefix: '/api/views' })
 await app.register(savedRoutes, { prefix: '/api/saved' })
 await app.register(actionsRoutes, { prefix: '/api/actions' })
+await app.register(purchaseRoutes, { prefix: '/api/purchases' })
 await app.register(scoresRoutes, { prefix: '/api/scores' })
 await app.register(adminRoutes, { prefix: '/api/admin' })
 

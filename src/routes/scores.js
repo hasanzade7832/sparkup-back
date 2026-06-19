@@ -61,7 +61,9 @@ async function scoresRoutes(app) {
       const todayActions = await app.db.query(`
         SELECT category, COUNT(*) as count
         FROM daily_actions
-        WHERE user_id = $1 AND action_date = CURRENT_DATE
+        WHERE user_id = $1
+          AND status != 'rejected'
+          AND action_date = (NOW() AT TIME ZONE 'Asia/Tehran')::date
         GROUP BY category
       `, [userId])
 
@@ -139,7 +141,7 @@ async function scoresRoutes(app) {
       const result = await app.db.query(`
         UPDATE user_scores
         SET total_score = 0, streak_count = 0, updated_at = NOW()
-        WHERE last_active_date < CURRENT_DATE
+        WHERE last_active_date < (NOW() AT TIME ZONE 'Asia/Tehran')::date
         RETURNING user_id
       `)
 
